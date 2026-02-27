@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>智识库 - 离线全栈版</title>
+    <script src="/static/vue.global.js"></script>
+    <script src="/static/tailwind.min.js"></script>
+    <link rel="stylesheet" href="/static/font-awesome/css/all.min.css">
+    <style>
+        .image-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+            gap: 10px;
+            margin-top: 10px;
+        }
+        .paint-image {
+            width: 100%;
+            height: 120px;
+            object-fit: cover;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+        .paint-image:hover {
+            transform: scale(1.05);
+        }
+    </style>
+</head>
+<body class="bg-gray-50 h-screen flex flex-col">
+    <div id="app" class="flex flex-1 overflow-hidden">
+        <div class="w-64 bg-slate-900 text-white flex flex-col p-4 shadow-xl">
+            <h2 class="text-xl font-bold mb-8 flex items-center border-b border-slate-700 pb-4">
+                <i class="fas fa-microchip mr-2 text-blue-400"></i> 智识库
+            </h2>
+
+            <div class="mb-6">
+                <p class="text-[10px] text-slate-500 mb-3 font-bold tracking-widest uppercase">本地库管理</p>
+                <input type="file" @change="uploadFile" class="hidden" id="up" accept=".txt,.pdf,.md,.html,.htm,.docx,.xlsx,.xls,.jpg,.jpeg,.png">
+                <label for="up" class="block w-full text-center bg-blue-600 hover:bg-blue-700 py-3 rounded-xl cursor-pointer transition shadow-lg text-sm font-bold">
+                    <i class="fas fa-file-import mr-2"></i> 学习新文档
+                </label>
+                <button @click="clearDB" class="w-full text-[10px] text-slate-600 mt-4 hover:text-red-400 transition">
+                    <i class="fas fa-trash-alt mr-1"></i> 清空所有记忆
+                </button>
+            </div>
+
+            <div class="flex-1 overflow-y-auto">
+                <p class="text-[10px] text-slate-500 mb-3 font-bold tracking-widest uppercase">已掌握的文档 ({{files.length}})</p>
+                <div v-for="f in files" :key="f" class="text-xs p-3 bg-slate-800/50 border border-slate-700 rounded-lg mb-2 flex justify-between items-center group hover:bg-slate-700 transition">
+                    <div class="truncate flex-1" :title="f">
+                        <i class="far fa-file-lines mr-2 text-blue-400"></i> {{f}}
+                    </div>
+                    <button @click.stop="deleteOneFile(f)" class="ml-2 text-slate-600 hover:text-red-400 transition" title="删除此文档">
+                        <i class="fas fa-trash-alt"></i>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <div class="flex-1 flex flex-col">
+            <header class="h-14 bg-white border-b flex items-center justify-between px-6 shadow-sm">
+                <div class="flex items-center space-x-2 bg-gray-100 p-1 rounded-full">
+                    <button @click="online = false" :class="!online ? 'bg-white shadow text-blue-600' : 'text-gray-400'" class="px-5 py-1.5 rounded-full text-xs font-black transition-all">🔒 纯隐私模式</button>
+                    <button @click="online = true" :class="online ? 'bg-white shadow text-green-600' : 'text-gray-400'" class="px-5 py-1.5 rounded-full text-xs font-black transition-all">🌐 联网增强</button>
+                </div>
+                <div class="text-[10px] text-gray-400 font-mono">Ryzen 7 4800H / 16GB</div>
+            </header>
+
+            <div class="flex-1 overflow-y-auto p-6 space-y-6 bg-[#f8fafc]" id="chat">
+                <div v-for="m in msgs" :class="m.role === 'user' ? 'justify-end' : 'justify-start'" class="flex">
+                    <div :class="m.role === 'user' ? 'bg-blue-600 text-white rounded-tr-none' : 'bg-white border text-slate-800 rounded-tl-none'" class="max-w-[75%] px-5 py-3 rounded-2xl shadow-sm text-sm leading-relaxed">
+                        {{m.text}}
+
+                           <div v-if="m.images && m.images.length > 0" class="image-grid">
+                            <img v-for="(img, index) in m.images" :key="index" :src="img" class="paint-image" @click="openImage(img)" title="点击查看原图">
+                        </div>
+                        <div v-if="m.mode" class="mt-2 text-[9px] font-bold opacity-30 text-right">{{m.mode}}</div>
+                    </div>
+                </div>
+                <div v-if="loading" class="flex space-x-2 items-center text-blue-400 text-xs animate-pulse">
+                    <i class="fas fa-circle-notch fa-spin"></i>
+                    <span>AI 正在深度思考并检索中...</span>
+                </div>
+            </div>
+
+            <div class="p-6 bg-white border-t shadow-2xl">
+                <div class="max-w-4xl mx-auto flex gap-4">
+                    <input v-model="input" @keyup.enter="send" placeholder="输入问题探讨..." class="flex-1 border-2 border-gray-100 rounded-2xl px-5 py-3 focus:border-blue-500 outline-none transition-all text-sm shadow-inner">
+                    <button @click="send" :disabled="loading" class="bg-blue-600 text-white px-10 rounded-2xl font-black hover:bg-blue-700 disabled:bg-gray-300 transition-all shadow-lg active:scale-95">
+                        发送
+                    </button>
+                </div>
+            </div>
+
+
+        </div>
+    </div>
+
+    <script>
+        const { createApp, ref, onMounted, nextTick } = Vue
+        createApp({
+            setup() {
+                const msgs = ref([{ role: 'ai', text: '你好！我是你的个人私有助理。请在左侧上传文档，我会将它们存入本地持久化库并进行学习。' }])
+                const input = ref(''), files = ref([]), online = ref(false), loading = ref(false)
+
+                // 核心：从后端获取文件列表
+                const refreshFiles = async () => {
+                    try {
+                        const res = await fetch('/files')
+                        const data = await res.json()
+                        files.value = data.files // 更新响应式变量
+                    } catch (e) {
+                        console.error("加载文件列表失败", e)
+                    }
+                }
+
+                const scrollToBottom = async () => {
+                    await nextTick()
+                    const chat = document.getElementById('chat')
+                    chat.scrollTop = chat.scrollHeight
+                }
+
+                const send = async () => {
+                    if(!input.value || loading.value) return
+                    const q = input.value
+                    msgs.value.push({ role: 'user', text: q })
+                    input.value = '', loading.value = true
+                    scrollToBottom()
+
+                    try {
+                        const res = await fetch('/chat', {
+                            method: 'POST',
+                            headers: {'Content-Type': 'application/json'},
+                            body: JSON.stringify({ query: q, use_online: online.value })
+                        })
+                        const d = await res.json()
+                        // msgs.value.push({ role: 'ai', text: d.answer, mode: d.mode })
+                        //
+                        msgs.value.push({
+                                role: 'ai',
+                                text: d.answer,
+                                mode: d.mode,
+                                images: d.images || []  // 确保接收后端传来的图片数组
+                            })
+
+
+                    } catch {
+                        msgs.value.push({ role: 'ai', text: '⚠️ 通信故障：请检查后端服务是否开启。' })
+                    } finally {
+                        loading.value = false
+                        scrollToBottom()
+                    }
+                }
+
+                // 文件上传并自动触发刷新
+                const uploadFile = async (e) => {
+                    const f = e.target.files[0]
+                    if(!f) return
+                    const fd = new FormData(); fd.append('file', f)
+                    loading.value = true
+
+                    try {
+                        const res = await fetch('/upload', { method: 'POST', body: fd })
+                        const result = await res.json()
+                        if(result.status === 'success') {
+                            // 【关键动作】：上传成功后立即重新请求文件列表
+                            await refreshFiles()
+                        }
+                    } catch (e) {
+                        alert("文件处理失败")
+                    } finally {
+                        loading.value = false
+                    }
+                }
+
+                const clearDB = async () => {
+                    if(confirm('清空将导致 AI 遗忘所有已学习的文档，确定吗？')) {
+                        await fetch('/clear', { method: 'DELETE' })
+                        await refreshFiles()
+                        msgs.value = [{ role: 'ai', text: '数据库已重置，记忆已清空。' }]
+                    }
+                }
+
+                const deleteOneFile = async (filename) => {
+                    if(!confirm(`确定要彻底删除文档 "${filename}" 吗？`)) return
+                    try {
+                        const res = await fetch(`/files/${filename}`, { method: 'DELETE' })
+                        const data = await res.json()
+                        if(data.status === 'deleted') {
+                            await refreshFiles()
+                        } else {
+                            alert("删除失败: " + (data.message || '未知错误'))
+                        }
+                    } catch(e) {
+                        alert("通信错误")
+                    }
+                }
+
+
+                const openImage = (url) => {
+                    window.open(url, '_blank'); // 点击图片在新窗口打开大图
+                }
+
+                onMounted(refreshFiles)
+                return { msgs, input, files, online, loading, send, uploadFile, clearDB, deleteOneFile,openImage }
+            }
+        }).mount('#app')
+    </script>
+</body>
+</html>

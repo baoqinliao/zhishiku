@@ -1,0 +1,7 @@
+pytesseract
+Pillow
+beautifulsoup4
+lxml
+python-docx
+openpyxl
+pandas

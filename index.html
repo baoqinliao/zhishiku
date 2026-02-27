@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>智识库 - 本地私有 AI</title>
+    <script src="/static/vue.global.js"></script>
+<script src="/static/tailwind.min.js"></script>
+<link rel="stylesheet" href="/static/font-awesome/css/all.min.css">
+<!--    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>-->
+<!--    <script src="https://cdn.tailwindcss.com"></script>-->
+<!--    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">-->
+</head>
+<body class="bg-gray-100 h-screen flex">
+    <div id="app" class="flex w-full h-full overflow-hidden">
+        <div class="w-72 bg-white border-r flex flex-col p-4">
+            <h1 class="text-xl font-bold mb-6 text-blue-600"><i class="fas fa-brain mr-2"></i>智识库</h1>
+
+            <div class="mb-8">
+                <label class="block text-sm font-medium text-gray-700 mb-2">管理文档</label>
+                <input type="file" @change="handleFileUpload" class="hidden" id="fileInput" accept=".jpg,.jpeg,.png,.pdf,.doc,.docx,.xls,.xlsx">
+                <label for="fileInput" class="w-full flex items-center justify-center px-4 py-2 border border-dashed border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50 mb-2">
+                    <i class="fas fa-cloud-upload-alt mr-2"></i> 上传文档
+                </label>
+                <button @click="clearDB" class="w-full text-xs text-red-500 hover:underline">清空所有数据</button>
+            </div>
+
+            <div class="flex-1 overflow-y-auto">
+                <p class="text-xs font-semibold text-gray-400 uppercase mb-2">已学习的文档</p>
+                <ul class="space-y-2">
+                    <li v-for="file in fileList" :key="file" class="text-sm p-2 bg-gray-50 rounded truncate">
+                        <i class="far fa-file-alt mr-2 text-gray-400"></i>{{ file }}
+                    </li>
+                </ul>
+            </div>
+        </div>
+
+        <div class="flex-1 flex flex-col">
+            <div class="h-14 bg-white border-b flex items-center justify-between px-6">
+                <div class="flex items-center space-x-4">
+                    <span class="text-sm text-gray-500">模式选择：</span>
+                    <button @click="useOnline = false" :class="!useOnline ? 'bg-blue-100 text-blue-600' : 'text-gray-400'" class="text-xs px-3 py-1 rounded-full font-medium transition">🔒 纯本地隐私</button>
+                    <button @click="useOnline = true" :class="useOnline ? 'bg-green-100 text-green-600' : 'text-gray-400'" class="text-xs px-3 py-1 rounded-full font-medium transition">🌐 联网搜索</button>
+                </div>
+            </div>
+
+            <div class="flex-1 overflow-y-auto p-6 space-y-4" id="chatbox">
+                <div v-for="msg in messages" :class="msg.role === 'user' ? 'justify-end' : 'justify-start'" class="flex items-end space-x-2">
+                    <div :class="msg.role === 'user' ? 'bg-blue-600 text-white' : 'bg-white border text-gray-800'" class="max-w-2xl px-4 py-3 rounded-2xl shadow-sm text-sm whitespace-pre-wrap">
+                        {{ msg.content }}
+                        <div v-if="msg.images && msg.images.length > 0" class="image-grid">
+                            <img v-for="(img, index) in msg.images" :key="index" :src="img" class="paint-image" @click="openImage(img)" title="点击查看原图">
+                        </div>
+                        <div v-if="msg.source" class="mt-2 text-[10px] opacity-50 italic">来源：{{ msg.source }}</div>
+                    </div>
+                </div>
+                <div v-if="loading" class="flex justify-start">
+                    <div class="bg-gray-200 px-4 py-2 rounded-2xl text-xs animate-pulse">AI 正在思考...</div>
+                </div>
+            </div>
+
+            <div class="p-4 bg-white border-t">
+                <div class="max-w-4xl mx-auto flex space-x-4">
+                    <input v-model="userInput" @keyup.enter="sendMessage" placeholder="问我关于文档或任何事情..." class="flex-1 border rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    <button @click="sendMessage" class="bg-blue-600 text-white px-6 py-2 rounded-xl hover:bg-blue-700 transition">发送</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const { createApp, ref, onMounted } = Vue
+        createApp({
+            setup() {
+                const messages = ref([{ role: 'assistant', content: '你好！我是你的本地知识库助手。请先上传文档，或者直接开始聊天。' }])
+                const userInput = ref('')
+                const fileList = ref([])
+                const useOnline = ref(false)
+                const loading = ref(false)
+
+                const fetchFiles = async () => {
+                    const res = await fetch('http://localhost:8000/files')
+                    const data = await res.json()
+                    fileList.ref = data.files
+                }
+
+                const handleFileUpload = async (e) => {
+                    const file = e.target.files[0]
+                    const formData = new FormData()
+                    formData.append('file', file)
+                    loading.ref = true
+                    await fetch('http://localhost:8000/upload', { method: 'POST', body: formData })
+                    await fetchFiles()
+                    loading.ref = false
+                    alert('文档上传成功！')
+                }
+
+                const sendMessage = async () => {
+                    if (!userInput.value) return
+                    const query = userInput.value
+                    messages.value.push({ role: 'user', content: query })
+                    userInput.value = ''
+                    loading.value = true
+
+                    try {
+                        const res = await fetch('http://localhost:8000/chat', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ query, use_online: useOnline.value })
+                        })
+                        const data = await res.json()
+                        messages.value.push({ role: 'assistant', content: data.answer, source: data.source_docs,images:data.images||[]})
+                    } catch (e) {
+                        alert('连接后端失败，请确保 main.py 正在运行')
+                    } finally {
+                        loading.value = false
+                        setTimeout(() => { document.getElementById('chatbox').scrollTop = 99999 }, 100)
+                    }
+                }
+
+                const clearDB = async () => {
+                    if (confirm('确定要清空所有已学习的文档吗？')) {
+                        await fetch('http://localhost:8000/clear', { method: 'DELETE' })
+                        fetchFiles()
+                    }
+                }
+
+                const openImage = (url) => {
+                    window.open(url, '_blank');
+                }
+
+                onMounted(fetchFiles)
+                return { messages, userInput, fileList, useOnline, loading, handleFileUpload, sendMessage, clearDB,openImage }
+            }
+        }).mount('#app')
+    </script>
+</body>
+</html>
